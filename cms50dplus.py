@@ -2,6 +2,11 @@
 import sys, serial, argparse, csv, datetime
 from dateutil import parser as dateparser
 import time
+import RPi.GPIO as GPIO
+import time
+from _thread import *
+
+
 
 class LiveDataPoint(object):
     def __init__(self, time, data): 
@@ -286,27 +291,27 @@ class CMS50Dplus(object):
             self.sendBytes([0xf6, 0xf6, 0xf6])
             self.disconnect()
 
-def dumpLiveData(port, filename):
-    print("Saving live data...")
-    print("Press CTRL-C or disconnect the device to terminate data collection.")
+def dumpLiveData(port):
+    global liveBPM, gotBPM, servoHeartRate
     oximeter = CMS50Dplus(port)
     measurements = 0
-    with open(filename, 'w') as csvfile:
-        writer = csv.writer(csvfile, quoting=csv.QUOTE_NONNUMERIC)
-        writer.writerow(LiveDataPoint.getCsvColumns())
-        for liveData in oximeter.getLiveData():
-            writer.writerow(liveData.getCsvData())
-            print(" bpm is ", liveData.pulseRate)
-            measurements += 1
-            sys.stdout.write("\rGot {0} measurements...".format(measurements))
-            sys.stdout.flush()
+    for liveData in oximeter.getLiveData():
+        # print(" bpm is ", liveData.pulseRate)
+        liveBPM = liveData.pulseRate
+        if not gotBPM and liveBPM != 0:
+            gotBPM = True
+            servoHeartRate = liveBPM
+            print("Once")
+        measurements += 1
 
+   
 def getLiveData(port, framerate=None):
     oximeter = CMS50Dplus(port)
     for liveData in oximeter.getLiveData():
         if framerate is not None:
             time.sleep(1.0/framerate)
         yield liveData.getDictData()
+        # yield liveData.pulseRate
 
 
 def dumpRecordedData(starttime, port, filename):
@@ -330,21 +335,105 @@ def valid_datetime(s):
         msg = "Not a valid date: '{0}'.".format(s)
         raise argparse.ArgumentTypeError(msg)
 
+
+
+def setup():
+    FHeartRates = [72, 73, 74, 75, 73, 73]
+    MHeartRates = [68, 68, 69, 70, 69, 68]
+    AvgHeartRates = [70, 71, 70, 73, 71, 71]
+    targetHeartRate = 0
+    
+    print("Please type your age.")
+    age = int(input())
+    print("Please select your biological sex. Type \'M\' for male and \'F\' for female.\n If you would prefer to skip, please type \'S\'.")
+    sex = input().upper()
+    
+    if age < 26:
+        ageRange = 0
+    elif age >= 26 and age < 36:
+        ageRange = 1
+    elif age >= 36 and age < 46:
+        ageRange = 2
+    elif age >= 46 and age < 56:
+        ageRange = 3
+    elif age >= 56 and age < 66:
+        ageRange = 4
+    else:
+        ageRange = 5
+
+    if sex == 'F':
+        targetHeartRate = FHeartRates[ageRange]
+    elif sex == 'M':
+        targetHeartRate = MHeartRates[ageRange]
+    else:
+        targetHeartRate = AvgHeartRates[ageRange]
+    print("Your target heartrate is",targetHeartRate)
+    return targetHeartRate
+
+
+def moveServo():
+    global servo, forward
+    servo.start(2.5) # Initialization
+    if forward:
+        servo.ChangeDutyCycle(12)
+    else:
+        servo.ChangeDutyCycle(2)
+    
+def changeServoHeartRate():
+    global gotBPM, servoHeartRate, liveBPM, targetHeartRate
+    print("changing")
+    if liveBPM > targetHeartRate and liveBPM <= servoHeartRate and servoHeartRate >= targetHeartRate:
+            servoHeartRate -= 1
+            print("servoHeartRate: ", servoHeartRate)
+
+def updateServoHeartRate():
+    timer = 30
+    while True:
+        while timer:
+            time.sleep(1)
+            timer-=1
+        changeServoHeartRate()
+        timer = 30
+    
+
+def moveServoTimer():
+    global servoHeartRate,forward, liveBPM, gotBPM
+    while True:
+        timer = servoHeartRate/60
+        while timer > 0:
+            time.sleep(.1)
+            timer-=.1
+        moveServo() #move the servo
+        forward = not forward #reset the direction of forward
+        
+        #recalculate the servoHeartRate is managed in another async function
+
 if __name__ == "__main__":
+    forward = 1 #for how we move the arduino
+    servoPIN = 17
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(servoPIN, GPIO.OUT)
+    servo = GPIO.PWM(servoPIN, 50) # GPIO 17 for PWM with 50Hz
+
     parser = argparse.ArgumentParser(description="cms50dplus.py v1.2 - Contec CMS50D+ Data Downloader (c) 2015 atbrask")
-    parser.add_argument("mode", help="Specify LIVE for live data or RECORDED for recorded data.", choices=["LIVE", "RECORDED"])
     parser.add_argument("serialport", help="The device's virtual serial port.")
-    parser.add_argument("output", help="Output CSV file.")
     parser.add_argument('-s', "--starttime", help="The start time for RECORDED mode data.", type=valid_datetime)
 
     args = parser.parse_args()
 
-    if args.mode == 'LIVE':
-        dumpLiveData(args.serialport, args.output)
-    elif args.mode == 'RECORDED' and args.starttime is not None:
-        dumpRecordedData(args.starttime, args.serialport, args.output)
-    else:
-        print("Missing start time for RECORDED mode.")
+    targetHeartRate = setup()
+    servoHeartRate = targetHeartRate
+    liveBPM = 0
+    gotBPM = False
+    start_new_thread(updateServoHeartRate, ())
+    start_new_thread(moveServoTimer, ())
+   
+    while (1):
+        dumpLiveData(args.serialport)
+   
 
-    print("")
-    print("Done.")
+   
+ 
+   
+
+    
