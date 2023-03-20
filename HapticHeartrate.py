@@ -336,11 +336,11 @@ def valid_datetime(s):
 def recordHowLong():
     global howLongTimer,targetHeartRate,liveBPM
     howLongTimer = 0
-    print(liveBPM,targetHeartRate)
+    # print(liveBPM,targetHeartRate)
     while liveBPM > targetHeartRate or liveBPM <= 0:
         time.sleep(1)
         howLongTimer += 1
-    print("Took ",howLongTimer, "s to acheive target heart rate of",targetHeartRate)
+    # print("Took ",howLongTimer, "s to acheive target heart rate of",targetHeartRate)
     writeToFile(["Achieved target heart rate in:"  + str(howLongTimer)+ "s"])
     recordHowLongMaintain()
     
@@ -350,7 +350,7 @@ def recordHowLongMaintain():
     while liveBPM <= targetHeartRate:
         time.sleep(1)
         maintainTimer += 1
-    print("Was able to maintain equal or below BPM of",targetHeartRate,"for", maintainTimer, "seconds")
+    # print("Was able to maintain equal or below BPM of",targetHeartRate,"for", maintainTimer, "seconds")
     writeToFile(["Maintained for: " +str(maintainTimer) + "s"])
     maintainTimer = 0
     recordHowLong()
@@ -361,17 +361,13 @@ def setup():
     MHeartRates = [68, 68, 69, 70, 69, 68]
     AvgHeartRates = [70, 71, 70, 73, 71, 71]
     targetHeartRate = 0
-
-    control1 = input("Control? Y or N").upper()
-    if control1 == "Y":
-        control = True
     
     print("Please type your age.")
     age = int(input())
     print("Please select your biological sex. Type \'M\' for male and \'F\' for female.\n If you would prefer to skip, please type \'S\'.")
     sex = input().upper()
     name = input("Please enter your name or N/A")
-    writeToFile([name,age,sex,"contorl = "+ str(control)])
+    writeToFile([name,age,sex,"control = "+ str(control)])
     
     if age < 26:
         ageRange = 0
@@ -392,7 +388,7 @@ def setup():
         targetHeartRate = MHeartRates[ageRange]
     else:
         targetHeartRate = AvgHeartRates[ageRange]
-    print("Your target heartrate is",targetHeartRate)
+    # print("Your target heartrate is",targetHeartRate)
     return targetHeartRate
 
 
@@ -411,7 +407,7 @@ def changeServoHeartRate():
                 servoHeartRate = liveBPM -1
             else:
                 servoHeartRate -= 1
-    print("servoHeartRate: ", servoHeartRate)
+    # print("servoHeartRate: ", servoHeartRate)
 
 def updateServoHeartRate():
     timer = 10
@@ -463,6 +459,14 @@ def writeToFile(info):
         writer = csv.writer(file)
         writer.writerow(info)
 
+def writeLiveBPM():
+    global liveBPM
+    while True:
+        while liveBPM > 0:
+            time.sleep(1)
+            time1 = datetime.datetime.utcnow().strftime("%H:%M:%S")
+            writeToFile(["LiveBPM", time1, str(liveBPM)])
+
 
 if __name__ == "__main__":
     CSV_NAME = "hapticHeartRateUser" + datetime.datetime.utcnow().strftime("%d-%m-%Y_%H:%M:%S")
@@ -475,10 +479,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="cms50dplus.py v1.2 - Contec CMS50D+ Data Downloader (c) 2015 atbrask")
     parser.add_argument("serialport", help="The device's virtual serial port.")
+    # parser.add_argument("control", type=bool)
+    parser.add_argument('--control', action='store_true')
+    parser.add_argument('--no-control', dest='control', action='store_false')
     parser.add_argument('-s', "--starttime", help="The start time for RECORDED mode data.", type=valid_datetime)
     howLongTimer = 0
     args = parser.parse_args()
-    control = False
+    control = args.control
+    # print("control: ", control)
     maintainTimer = 0
     targetHeartRate = setup()
     servoHeartRate = targetHeartRate
@@ -493,6 +501,7 @@ if __name__ == "__main__":
     start_new_thread(dumpData,())
     start_new_thread(recordHowLong,())
     start_new_thread(recordMinAndMax,())
+    start_new_thread(writeLiveBPM,())
     while True:
         i = input()
         if i == "q":
